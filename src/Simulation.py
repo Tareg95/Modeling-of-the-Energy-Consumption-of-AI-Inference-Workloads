@@ -435,6 +435,7 @@ def energy_arrays(
     gpus_deep_idle: np.ndarray,
     power: PowerParams = PowerParams(),
     step_hours: float = 0.25,
+    total_gpus: int = 256,
 ) -> dict[str, np.ndarray | float]:
     """Compute energy use per step and daily totals.
 
@@ -447,7 +448,7 @@ def energy_arrays(
     if it ever stops being a kwarg, the daily kWh will silently scale
     wrong when step_minutes != 15. --E
     """
-
+    num_nodes = total_gpus / 8
     rho_state = np.minimum(rho_effective, 1.0)
 
     pure_active_power = gpus_active * power.p_active_avg
@@ -461,12 +462,14 @@ def energy_arrays(
     energy_active_overhead = (active_overhead_power * power.pue * step_hours) / 1000
     energy_inactive_idle = (inactive_idle_power * power.pue * step_hours) / 1000
     energy_deep_idle = (deep_idle_power * power.pue * step_hours) / 1000
+    energy_infra = (power.p_infra * num_nodes * power.pue * step_hours) / 1000    
 
     energy_total = (
         energy_pure_work
         + energy_active_overhead
         + energy_inactive_idle
         + energy_deep_idle
+        + energy_infra
     )
     energy_ideal = (pure_active_power * 1.0 * step_hours) / 1000
 
@@ -483,6 +486,7 @@ def energy_arrays(
         "idle_kwh": float(np.sum(energy_inactive_idle)),
         "deep_kwh": float(np.sum(energy_deep_idle)),
         "ideal_total_kwh": float(np.sum(energy_ideal)),
+        "infra_kwh": float(np.sum(energy_infra)),
     }
 
 
@@ -511,6 +515,7 @@ def run_one(
         states["gpus_deep_idle"],
         power,
         step_hours=step_hours,
+        total_gpus=total_gpus,
     )
 
     return {

@@ -25,6 +25,9 @@ class PowerParams:
     p_active_avg: float = 450.0
     pue: float = 1.08
     execution_idle_fraction: float = 0.197
+    p_infra: float = 6300.0  # Non-GPU node overhead (W): CPUs, memory, NICs, storage.
+                              # Derived from DGX B200 node TDP (14,300W) minus 8x B200 GPU TDP (8x1,000W).
+                              # Source: NVIDIA DGX B200 Datasheet, resources.nvidia.com
 
 
 @dataclass(frozen=True)
@@ -115,5 +118,5 @@ DIURNAL_SHAPE = np.array(
 # not listed in ARRIVAL_MODES - the tuple only constrains the @param
 # dropdown comment, not the actual function dispatch in build_lambda_15min. --E
 STRATEGIES = ("Static", "Conservative", "Aggressive")
-ARRIVAL_MODES = ("nhpp_only", "hybrid")
+ARRIVAL_MODES = ("nhpp_only", "hybrid", "gamma_renewal")
 BURST_DISTRIBUTIONS = ("pareto", "gamma")
