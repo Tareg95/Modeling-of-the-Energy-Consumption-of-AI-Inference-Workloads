@@ -75,11 +75,19 @@ def build_diurnal_lambda(
 
 
 def daily_intensity_from_hourly(lambda_hourly: np.ndarray) -> Callable[[float], float]:
-    """Return a function lambda(t) that maps hour-of-day to request rate."""
+    """Return a function lambda(t) that linearly interpolates between hours.
+
+    Was a piecewise-constant hourly step before; the step pattern then
+    propagated through the binned demand and made every downstream plot
+    look chunky. The hourly anchors are still the only data we have, but
+    interpolating between them at least lets the NHPP thinning see a
+    continuous rate. --E
+    """
+
+    hours = np.arange(24)
 
     def lambda_func(t: float) -> float:
-        hour = int(t) % 24
-        return float(lambda_hourly[hour])
+        return float(np.interp(t % 24, hours, lambda_hourly))
 
     return lambda_func
 
@@ -340,17 +348,24 @@ def provisioning_arrays(
     total_gpus: int,
     pod_size: int = 8,
 ) -> dict[str, np.ndarray]:
-    """Create static, conservative, and aggressive provisioning arrays."""
+    """Create static + per-rho-target provisioning arrays.
 
-    return {
-        "Static": np.full(len(lambda_arr), total_gpus, dtype=float),
-        "Conservative": np.minimum(
-            scale_in_pods(lambda_arr / (0.78 * mu), pod_size), total_gpus
-        ),
-        "Aggressive": np.minimum(
-            scale_in_pods(lambda_arr / (0.95 * mu), pod_size), total_gpus
-        ),
+    Strategy ordering is Conservative -> Moderate -> Tight -> Aggressive
+    (decreasing headroom: 22 / 15 / 10 / 5 %). --E
+    """
+
+    targets = {
+        "Conservative": 0.78,
+        "Moderate":     0.85,
+        "Tight":        0.90,
+        "Aggressive":   0.95,
     }
+    out = {"Static": np.full(len(lambda_arr), total_gpus, dtype=float)}
+    for name, rho in targets.items():
+        out[name] = np.minimum(
+            scale_in_pods(lambda_arr / (rho * mu), pod_size), total_gpus
+        )
+    return out
 
 
 def apply_cold_start_lag(c_active: np.ndarray) -> np.ndarray:
@@ -457,10 +472,10 @@ def energy_arrays(
     inactive_idle_power = c_ready * (1 - rho_state) * power.p_execution_idle
     deep_idle_power = gpus_deep_idle * power.p_idle
 
-    energy_pure_work = (pure_active_power * power.pue * step_hours) / 1000
-    energy_active_overhead = (active_overhead_power * power.pue * step_hours) / 1000
-    energy_inactive_idle = (inactive_idle_power * power.pue * step_hours) / 1000
-    energy_deep_idle = (deep_idle_power * power.pue * step_hours) / 1000
+    energy_pure_work = (pure_active_power * step_hours) / 1000
+    energy_active_overhead = (active_overhead_power * step_hours) / 1000
+    energy_inactive_idle = (inactive_idle_power * step_hours) / 1000
+    energy_deep_idle = (deep_idle_power * step_hours) / 1000
 
     energy_total = (
         energy_pure_work
@@ -468,7 +483,7 @@ def energy_arrays(
         + energy_inactive_idle
         + energy_deep_idle
     )
-    energy_ideal = (pure_active_power * 1.0 * step_hours) / 1000
+    energy_ideal = (pure_active_power * step_hours) / 1000
 
     return {
         "energy_pure_work": energy_pure_work,

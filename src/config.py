@@ -18,12 +18,11 @@ import numpy as np
 
 @dataclass(frozen=True)
 class PowerParams:
-    """Power and facility parameters used by the energy model."""
+    """GPU power parameters used by the energy model."""
 
     p_idle: float = 140.0
     p_execution_idle: float = 220.0
     p_active_avg: float = 450.0
-    pue: float = 1.08
     execution_idle_fraction: float = 0.197
 
 
@@ -37,16 +36,18 @@ class ClusterParams:
     c_peak: int = 200                     # GPUs active at peak hour (sets lambda_peak)
 
     # Provisioning thresholds (target effective utilisation).
-    # Conservative leaves ~22% headroom to absorb bursts/cold-start, Aggressive
-    # leaves only ~5%. These values are used by Block 6/7 of the notebook. --E
+    # Conservative leaves ~22% headroom to absorb bursts/cold-start, Moderate
+    # ~15%, Tight ~10%, Aggressive ~5%. Used by Block 5/6/7 of the notebook. --E
     target_rho_conservative: float = 0.78
+    target_rho_moderate: float = 0.85
+    target_rho_tight: float = 0.90
     target_rho_aggressive: float = 0.95
 
     # Time discretisation. Drop step_minutes to expose finer-grain spikes
     # (energy total stays invariant; max_rho and SLA-violation count grow
     # because shorter bursts stop being averaged out). --E
     T_day_hours: float = 24.0
-    step_minutes: float = 15.0
+    step_minutes: float = 3.0
 
     @property
     def step_hours(self) -> float:
@@ -74,12 +75,22 @@ class BurstParams:
     """
 
     distribution: str = "pareto"
-    pareto_shape: float = 1.2
+    # pareto_shape=2 is the textbook finite-mean / infinite-variance heavy-tail
+    # benchmark (mean = scale, variance undefined). Picked over the original
+    # 1.2 (infinite-mean) and over alpha>2.5 (no tail left) by a 20-seed
+    # sweep against the BurstGPT Gamma renewal reference: under this shape the
+    # Pareto hybrid's Conservative SLA mean and max_rho match Gamma's within
+    # 1 std, which is where we have IRL data calibration. --E
+    pareto_shape: float = 2.0
     gamma_shape: float = 0.5
     gamma_scale: float = 2.0
-    burst_rate_per_hour: float = 3.0
+    # burst_rate_per_hour=10 + size=0.5 picked by a (rate, size) sweep against
+    # the same Gamma reference at 3-min resolution. Was rate=3, size=10
+    # historically; that was tuned for 15-min binning, which silently
+    # flattened the bursts. --E
+    burst_rate_per_hour: float = 10.0
     burst_window_hours: float = 0.01
-    size_multiplier_x_lambda_peak: float = 10.0
+    size_multiplier_x_lambda_peak: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -114,6 +125,6 @@ DIURNAL_SHAPE = np.array(
 # Option lists. Note: gamma_renewal still works at runtime even if it's
 # not listed in ARRIVAL_MODES - the tuple only constrains the @param
 # dropdown comment, not the actual function dispatch in build_lambda_15min. --E
-STRATEGIES = ("Static", "Conservative", "Aggressive")
+STRATEGIES = ("Static", "Conservative", "Moderate", "Tight", "Aggressive")
 ARRIVAL_MODES = ("nhpp_only", "hybrid")
 BURST_DISTRIBUTIONS = ("pareto", "gamma")
